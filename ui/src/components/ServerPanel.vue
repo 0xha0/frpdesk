@@ -26,7 +26,7 @@ const fields = computed(() => info.value ? [
   ["Subdomain host", info.value.subdomainHost || "—"],
   ["Max pool count", info.value.maxPoolCount],
   ["Max ports per client", info.value.maxPortsPerClient || "—"],
-  ["Heartbeat timeout", `${info.value.heartbeatTimeout}s`],
+  ["Heartbeat timeout", info.value.heartbeatTimeout > 0 ? `${info.value.heartbeatTimeout}s` : "—"],
   ["Allowed ports", info.value.allowPortsStr || "—"],
   ["TLS only", yesno(info.value.tlsForce)],
 ] : []);
@@ -57,9 +57,10 @@ const stats = computed(() => info.value ? [
       <div>
         <div class="card p-4">
           <div class="mb-2 text-xs text-text-3">{{ t("Proxies by type") }}</div>
-          <div v-for="(n, ty) in info.proxyCounts" :key="ty" class="flex justify-between py-0.5 text-sm">
+          <div v-for="(n, ty) in info.proxyTypeCount" :key="ty" class="flex justify-between py-0.5 text-sm">
             <span class="mono text-text-2">{{ ty }}</span><span class="mono">{{ n }}</span>
           </div>
+          <div v-if="!info.proxyTypeCount || Object.keys(info.proxyTypeCount).length === 0" class="text-sm text-text-3">0</div>
         </div>
         <div v-if="me?.client.server_addr" class="card mt-4 p-4 text-sm">
           <div class="mb-1 text-xs text-text-3">{{ t("Clients connect to") }}</div>

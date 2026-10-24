@@ -17,8 +17,12 @@ async function load() {
 onMounted(load);
 watch(type, load);
 
-// frps names a proxy "<user>.<name>"
-const split = (name: string) => { const i = name.indexOf("."); return i < 0 ? ["", name] : [name.slice(0, i), name.slice(i + 1)]; };
+// frps names a proxy "<user>.<name>" and gives the user beside it
+const split = (p: any): [string, string] => {
+  const user: string = p.user ?? "";
+  const name: string = p.name ?? "";
+  return [user, user && name.startsWith(user + ".") ? name.slice(user.length + 1) : name];
+};
 const remote = (p: any) => {
   const c = p.conf ?? {};
   if (c.remotePort) return `:${c.remotePort}`;
@@ -58,8 +62,8 @@ const when = (s: string) => (s ? s.replace("T", " ").slice(0, 16) : "—");
         </thead>
         <tbody>
           <tr v-for="p in rows" :key="p.name" class="border-b border-line last:border-0 hover:bg-surface-2/40">
-            <td class="td mono">{{ split(p.name)[0] || "—" }}</td>
-            <td class="td mono font-medium">{{ split(p.name)[1] }}</td>
+            <td class="td mono">{{ split(p)[0] || "—" }}</td>
+            <td class="td mono font-medium">{{ split(p)[1] }}</td>
             <td class="td mono">{{ remote(p) }}</td>
             <td class="td"><span class="badge" :class="p.status === 'online' ? 'bg-ok-soft text-ok' : 'bg-surface-2 text-text-3'">{{ t(p.status) }}</span></td>
             <td class="td mono text-text-2">{{ p.clientVersion || "—" }}</td>
