@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/sessions"
@@ -31,6 +32,10 @@ type API struct {
 	frps    *frpsClient
 	sampler *Sampler
 	limiter *loginLimiter
+
+	trafficMu    sync.Mutex // the aggregated traffic, kept 15 s
+	trafficCache []byte
+	trafficAt    time.Time
 }
 
 func New(cfg *config.Config, store *users.Store, version string) *API {

@@ -58,7 +58,7 @@ async function save() {
         <div>
           <label class="mb-1 block text-sm text-text-2">{{ t("Token") }}</label>
           <div class="flex gap-2">
-            <input v-model="form.token" class="input mono" required />
+            <input v-model="form.token" class="input mono" required minlength="8" :title="t('At least 8 characters')" />
             <button type="button" class="btn-outline shrink-0" @click="generateToken">{{ t("Generate") }}</button>
           </div>
         </div>

@@ -121,8 +121,29 @@ type dayTraffic struct {
 }
 
 // frpsTraffic: every proxy's traffic by day (frps keeps 7), summed too. Days are the server's
-// calendar days, oldest first; the last one is today so far.
+// calendar days, oldest first; the last one is today so far. One call to frps per proxy, so the
+// answer is kept for a few seconds (the page polls every minute; several admins may).
 func (a *API) frpsTraffic(c *gin.Context) {
+	a.trafficMu.Lock()
+	if time.Since(a.trafficAt) < 15*time.Second && a.trafficCache != nil {
+		body := a.trafficCache
+		a.trafficMu.Unlock()
+		c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+		return
+	}
+	a.trafficMu.Unlock()
+	body, err := a.trafficBody()
+	if err != nil {
+		frpsError(c, err)
+		return
+	}
+	a.trafficMu.Lock()
+	a.trafficCache, a.trafficAt = body, time.Now()
+	a.trafficMu.Unlock()
+	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+}
+
+func (a *API) trafficBody() ([]byte, error) {
 	const days = 7
 	var proxies []dayTraffic
 	for _, t := range proxyTypes {
@@ -130,8 +151,7 @@ func (a *API) frpsTraffic(c *gin.Context) {
 			Proxies []proxyStats `json:"proxies"`
 		}
 		if err := a.frps.get("/api/proxy/"+t, &list); err != nil {
-			frpsError(c, err)
-			return
+			return nil, err
 		}
 		for _, p := range list.Proxies {
 			if len(proxies) >= 1000 {
@@ -139,8 +159,7 @@ func (a *API) frpsTraffic(c *gin.Context) {
 			}
 			var tr proxyTraffic
 			if err := a.frps.get("/api/traffic/"+p.Name, &tr); err != nil {
-				frpsError(c, err)
-				return
+				return nil, err
 			}
 			proxies = append(proxies, dayTraffic{Name: p.Name, User: p.User, Type: t, In: reverse(pad(tr.TrafficIn, days)), Out: reverse(pad(tr.TrafficOut, days))})
 		}
@@ -158,7 +177,10 @@ func (a *API) frpsTraffic(c *gin.Context) {
 	for i := range days {
 		labels[i] = now.AddDate(0, 0, i-days+1).Format("2006-01-02")
 	}
-	c.JSON(http.StatusOK, gin.H{"days": labels, "total": gin.H{"in": total.In, "out": total.Out}, "proxies": proxies})
+	if proxies == nil {
+		proxies = []dayTraffic{}
+	}
+	return json.Marshal(gin.H{"days": labels, "total": gin.H{"in": total.In, "out": total.Out}, "proxies": proxies})
 }
 
 func pad(v []int64, n int) []int64 {

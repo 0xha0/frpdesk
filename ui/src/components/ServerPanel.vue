@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, type Ref } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch, type Ref } from "vue";
 import { api, formatBytes, formatRate, formatTime, formatDateTime, type Me, type Sample, type Hour, type Traffic, type FrpsClient } from "../api";
 import { t } from "../i18n";
 import LineChart from "./LineChart.vue";
@@ -85,25 +85,30 @@ const periodTotal = computed(() => daySeries.value.reduce((s, x) => s + x.values
 
 // traffic by user: frps's per-proxy days summed per user (today for the 24h range, else 7 days:
 // frps keeps no more per proxy); a user selected shows its proxies
+const NO_USER = "\u0000none";   // proxies frps lists without a user (none here, as every login names one)
 const userSel = ref("");
 const period = (p: { in: number[]; out: number[] }) => {
   if (range.value === "24h") return { in: p.in[p.in.length - 1] ?? 0, out: p.out[p.out.length - 1] ?? 0 };
   return { in: p.in.reduce((a, b) => a + b, 0), out: p.out.reduce((a, b) => a + b, 0) };
 };
+const userKey = (p: { user: string }) => p.user || NO_USER;
 const byUser = computed(() => {
   const m = new Map<string, number>();
   for (const p of traffic.value?.proxies ?? []) {
     const v = period(p);
-    m.set(p.user || "—", (m.get(p.user || "—") ?? 0) + v.in + v.out);
+    m.set(userKey(p), (m.get(userKey(p)) ?? 0) + v.in + v.out);
   }
-  return [...m].map(([key, value]) => ({ key, label: key, value }));
+  return [...m].map(([key, value]) => ({ key, label: key === NO_USER ? t("(no user)") : key, value }));
 });
-const userProxies = computed(() => (traffic.value?.proxies ?? []).filter((p) => (p.user || "—") === userSel.value).map((p) => {
+const userProxies = computed(() => (traffic.value?.proxies ?? []).filter((p) => userKey(p) === userSel.value).map((p) => {
   const v = period(p);
-  const name = p.name.startsWith(userSel.value + ".") ? p.name.slice(userSel.value.length + 1) : p.name;
+  const name = p.user && p.name.startsWith(p.user + ".") ? p.name.slice(p.user.length + 1) : p.name;
   return { label: `${name} · ${p.type}`, value: v.in + v.out, in: v.in, out: v.out };
 }));
+const userTitle = computed(() => (userSel.value === NO_USER ? t("Proxies without a user") : t("Proxies of {user}", { user: userSel.value })));
 const userPeriod = computed(() => (range.value === "24h" ? t("today") : t("last 7 days")));
+// a drill-in whose user has gone (its clients left) goes back by itself
+watch(byUser, (list) => { if (userSel.value && !list.some((u) => u.key === userSel.value)) userSel.value = ""; });
 
 const port = (v: number) => (v ? String(v) : "—");
 const yesno = (v: boolean) => (v ? t("yes") : t("no"));
@@ -194,10 +199,10 @@ const fields = computed(() => info.value ? [
       <div class="mb-3 flex flex-wrap items-baseline justify-between gap-x-3">
         <h3 class="text-sm font-medium">
           <template v-if="!userSel">{{ t("Traffic by user") }}, {{ userPeriod }}</template>
-          <template v-else>{{ t("Proxies of {user}", { user: userSel }) }}, {{ userPeriod }}</template>
+          <template v-else>{{ userTitle }}, {{ userPeriod }}</template>
+          <span v-if="range === '30d'" class="ml-2 font-normal text-text-3">{{ t("frps keeps 7 days") }}</span>
         </h3>
         <button v-if="userSel" class="btn-ghost !px-2 !py-0.5 text-xs" @click="userSel = ''">← {{ t("All users") }}</button>
-        <span v-else-if="range === '30d'" class="text-xs text-text-3">{{ t("frps keeps 7 days") }}</span>
       </div>
       <ShareBar v-if="!userSel" :items="byUser" :format="(v) => formatBytes(v)" @select="userSel = $event" />
       <BarList v-else :rows="userProxies" :format="(v) => formatBytes(v)" />

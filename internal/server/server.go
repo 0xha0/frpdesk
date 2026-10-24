@@ -33,6 +33,7 @@ type Server struct {
 	plugin  *http.Server
 	web     *http.Server
 	cancel  context.CancelFunc
+	sampled chan struct{} // closed when the sampler has stopped (and saved)
 	version string
 }
 
@@ -86,6 +87,10 @@ func New(cfg *config.Config, store *users.Store, version string) (*Server, error
 		}
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("Referrer-Policy", "same-origin")
+		c.Header("X-Frame-Options", "DENY")
+		// the app is self-contained: its own scripts and styles (inline style attributes for the
+		// charts' colours), data: for the icon, nothing from elsewhere
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 		// a built file as it is; anything else is the app (its router takes the path)
 		if f, err := static.Open(c.Request.URL.Path); err == nil {
 			f.Close()
@@ -110,7 +115,11 @@ func New(cfg *config.Config, store *users.Store, version string) (*Server, error
 func (s *Server) Run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
-	go s.api.RunSampler(ctx)
+	s.sampled = make(chan struct{})
+	go func() {
+		defer close(s.sampled)
+		s.api.RunSampler(ctx)
+	}()
 	errs := make(chan error, 2)
 	serve := func(srv *http.Server, addr, what string) {
 		l, err := net.Listen("tcp", addr)
@@ -137,5 +146,10 @@ func (s *Server) Shutdown() {
 	defer cancel()
 	s.plugin.Shutdown(ctx)
 	s.web.Shutdown(ctx)
-	time.Sleep(200 * time.Millisecond) // the sampler's save on cancel
+	if s.sampled != nil { // the sampler saves its history on the way out
+		select {
+		case <-s.sampled:
+		case <-ctx.Done():
+		}
+	}
 }

@@ -54,7 +54,7 @@ var (
 	ErrExists    = errors.New("user exists")
 	ErrNotFound  = errors.New("no such user")
 	ErrBadName   = errors.New("name: letters, digits and _ only")
-	ErrBadToken  = errors.New("token: letters, digits and !@#$%^&*()-_ only")
+	ErrBadToken  = errors.New("token: 8 or more of letters, digits and !@#$%^&*()-_")
 	ErrBadPorts  = errors.New("ports: a port or a range like 30000-30099")
 	ErrBadDomain = errors.New("domains: a domain name each")
 	ErrBadSub    = errors.New("subdomains: letters, digits and - only")
@@ -129,7 +129,7 @@ func clean(u User) (User, error) {
 	if !nameFormat.MatchString(u.Name) {
 		return u, ErrBadName
 	}
-	if !tokenFormat.MatchString(u.Token) {
+	if len(u.Token) < 8 || !tokenFormat.MatchString(u.Token) {
 		return u, ErrBadToken
 	}
 	u.Ports = compact(u.Ports)
