@@ -18,7 +18,7 @@ const props = defineProps<{
 const host = ref<HTMLElement | null>(null);
 const width = ref(640);
 const height = computed(() => props.height ?? 200);
-const pad = { l: 68, r: 12, t: 12, b: 24 };
+const pad = computed(() => ({ l: width.value < 480 ? 56 : 68, r: 12, t: 12, b: 24 }));
 const hover = ref<number | null>(null);
 const table = ref(false);
 let ro: ResizeObserver | null = null;
@@ -39,13 +39,13 @@ const max = computed(() => {
 // times 1, 2, 2.5, 5 …) reaching above the maximum
 const ticks = computed(() => cleanTicks(max.value, props.base ?? 10));
 const top = computed(() => ticks.value[ticks.value.length - 1] || max.value);
-const x = (i: number) => pad.l + (n.value > 1 ? (i / (n.value - 1)) * (width.value - pad.l - pad.r) : 0);
-const y = (v: number) => pad.t + (1 - v / top.value) * (height.value - pad.t - pad.b);
+const x = (i: number) => pad.value.l + (n.value > 1 ? (i / (n.value - 1)) * (width.value - pad.value.l - pad.value.r) : 0);
+const y = (v: number) => pad.value.t + (1 - v / top.value) * (height.value - pad.value.t - pad.value.b);
 const path = (values: number[]) => values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
 const area = (values: number[]) => values.length ? `${path(values)} L${x(values.length - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z` : "";
 // a handful of x labels, evenly spaced
 const xLabels = computed(() => {
-  const want = Math.max(2, Math.min(8, Math.floor((width.value - pad.l - pad.r) / 80)));
+  const want = Math.max(2, Math.min(8, Math.floor((width.value - pad.value.l - pad.value.r) / 80)));
   const step = Math.max(1, Math.ceil((n.value - 1) / (want - 1)));
   const out: number[] = [];
   for (let i = 0; i < n.value; i += step) out.push(i);
@@ -57,7 +57,7 @@ function move(e: PointerEvent) {
   if (n.value < 2) return;
   const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
   const px = e.clientX - rect.left;
-  const i = Math.round(((px - pad.l) / (width.value - pad.l - pad.r)) * (n.value - 1));
+  const i = Math.round(((px - pad.value.l) / (width.value - pad.value.l - pad.value.r)) * (n.value - 1));
   hover.value = Math.min(n.value - 1, Math.max(0, i));
 }
 function key(e: KeyboardEvent) {

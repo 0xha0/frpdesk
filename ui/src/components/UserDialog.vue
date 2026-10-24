@@ -47,8 +47,8 @@ async function save() {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4" @click.self="emit('close')">
-    <form class="card w-full max-w-lg p-5 shadow-xl" @submit.prevent="save">
+  <div class="fixed inset-0 z-40 grid place-items-end bg-black/40 sm:place-items-center sm:p-4" @click.self="emit('close')">
+    <form class="card max-h-[92vh] w-full overflow-y-auto rounded-b-none p-5 shadow-xl sm:max-w-lg sm:rounded-b-xl" @submit.prevent="save">
       <h3 class="text-base font-semibold">{{ editing ? t("Edit user") : t("New user") }}</h3>
       <div class="mt-4 grid gap-4">
         <div>

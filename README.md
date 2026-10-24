@@ -27,22 +27,26 @@ frpc (user B) ──┼──► frps ──httpPlugins──┘   (is this user
   and Proxies pages, so it can stay on 127.0.0.1.
 - **Export**: each user has a button that downloads a complete `frpc.toml` (server address, the
   server's token, their user and token, TLS, an example proxy on their first port) from the
-  `[client]` section of the config.
+  `[client]` section of the config, with the comments in the UI's language (English or Chinese;
+  `notes_zh` for a Chinese version of the admin's notes).
 
 ## What the Server page shows
 
-frps keeps traffic **by day** (the last 7, per proxy and in total) and a few live gauges
-(connections, clients, proxies by type, today's bytes); that is all its API has, and its Prometheus
-endpoint says no more. frpdesk adds the finer view: every minute it samples frps's gauges and the
-throughput since the last sample, keeps 24 hours of that (`history.json` beside the users' file, so a
-restart keeps the day), and draws:
+frps keeps traffic **by day** (the last 7, per proxy and in total, in memory: a restart forgets them)
+and a few live gauges (connections, clients, proxies by type, today's bytes); that is all its API has,
+and its Prometheus endpoint says no more. frpdesk adds the finer and the longer view: every minute it
+samples frps's gauges and the throughput since the last sample, keeps a day of minutes and 30 days of
+hours (averages, peaks, bytes) in `history.json` beside the users' file, and draws:
 
 - stat tiles with a trend: connections, clients, inbound and outbound now (bytes/s), today's bytes
-- throughput, connections and clients over the last 24 hours (crosshair tooltips, arrow keys, a
-  table view)
-- traffic by day over the last 7 days, all proxies or one
+- throughput, connections and clients over the last 24 hours, 7 or 30 days (hourly averages for
+  the longer ranges; crosshair tooltips, arrow keys, a table view)
+- traffic by day: every proxy together from frpdesk's own samples (7 or 30 days, frps restarts
+  don't matter), or one proxy from frps's 7 days
 - the connected clients (user, host, frpc version, protocol, address, connected since)
 - frps's settings
+
+The UI fits a phone (cards instead of tables, the tabs in a row of their own).
 
 ## Install
 

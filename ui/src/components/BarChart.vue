@@ -11,7 +11,7 @@ const props = defineProps<{ series: Series[]; labels: string[]; format: (v: numb
 const host = ref<HTMLElement | null>(null);
 const width = ref(640);
 const height = computed(() => props.height ?? 200);
-const pad = { l: 68, r: 12, t: 12, b: 24 };
+const pad = computed(() => ({ l: width.value < 480 ? 56 : 68, r: 12, t: 12, b: 24 }));
 const hover = ref<{ g: number; s: number } | null>(null);
 const table = ref(false);
 let ro: ResizeObserver | null = null;
@@ -29,12 +29,12 @@ const max = computed(() => {
 });
 const ticks = computed(() => cleanTicks(max.value, props.base ?? 10));
 const top = computed(() => ticks.value[ticks.value.length - 1] || max.value);
-const plotW = computed(() => width.value - pad.l - pad.r);
+const plotW = computed(() => width.value - pad.value.l - pad.value.r);
 const slot = computed(() => (n.value ? plotW.value / n.value : plotW.value));
 const bar = computed(() => Math.min(24, Math.max(4, (slot.value * 0.7 - 2 * (props.series.length - 1)) / Math.max(1, props.series.length))));
 const groupW = computed(() => bar.value * props.series.length + 2 * (props.series.length - 1));
-const x = (g: number, s: number) => pad.l + g * slot.value + (slot.value - groupW.value) / 2 + s * (bar.value + 2);
-const y = (v: number) => pad.t + (1 - v / top.value) * (height.value - pad.t - pad.b);
+const x = (g: number, s: number) => pad.value.l + g * slot.value + (slot.value - groupW.value) / 2 + s * (bar.value + 2);
+const y = (v: number) => pad.value.t + (1 - v / top.value) * (height.value - pad.value.t - pad.value.b);
 const base = computed(() => y(0));
 // a column with its top corners rounded (4px) and a square base
 function rect(g: number, s: number, v: number): string {

@@ -223,24 +223,68 @@ func (a *API) setEnabled(on bool) gin.HandlerFunc {
 }
 
 // exportUser: a complete frpc.toml for the user: this server, their login, one example proxy on
-// their first port. A download (text/plain).
+// their first port; comments in the UI's language (?lang=zh, else Accept-Language). A download.
 func (a *API) exportUser(c *gin.Context) {
 	u, ok := a.Users.Get(c.Param("user"))
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "no such user"})
 		return
 	}
+	lang := c.Query("lang")
+	if lang == "" && strings.HasPrefix(strings.ToLower(c.GetHeader("Accept-Language")), "zh") {
+		lang = "zh"
+	}
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="frpc-%s.toml"`, u.Name))
 	c.Header("Cache-Control", "no-store")
-	c.String(http.StatusOK, a.ClientConfig(u))
+	c.String(http.StatusOK, a.ClientConfig(u, lang))
 }
 
-func (a *API) ClientConfig(u users.User) string {
+// the export's comments, English and Chinese
+var exportText = map[string]map[string]string{
+	"en": {
+		"head":    "frpc.toml for user %s on %s (frpdesk %s, %s)",
+		"token":   "<the server's token: ask the admin>",
+		"retry":   "keep retrying (the network may be down at boot)",
+		"sni":     "keep: the server's network needs it",
+		"ports":   "your ports: %s (one remotePort per proxy)",
+		"anyport": "your ports: any the server allows",
+		"domains": "your domains (http/https proxies): %s",
+		"subs":    "your subdomains: %s",
+		"example": "an example: ssh on this machine, reachable at %s:%d",
+		"askport": "an example: ssh on this machine; remotePort must be one of your ports",
+		"more":    "more services: another [[proxies]] block each, with its own name and one of your ports",
+		"docs":    "frp's client reference: https://gofrp.org/en/docs/reference/client/",
+	},
+	"zh": {
+		"head":    "用户 %s 在 %s 上的 frpc.toml（frpdesk %s，%s）",
+		"token":   "<服务器令牌：向管理员索取>",
+		"retry":   "连不上时一直重试（开机时网络可能还没好）",
+		"sni":     "保留这一行：服务器所在网络需要它",
+		"ports":   "你的端口：%s（每条隧道一个 remotePort）",
+		"anyport": "你的端口：服务器允许的任意端口",
+		"domains": "你的域名（http/https 隧道）：%s",
+		"subs":    "你的子域名：%s",
+		"example": "示例：把本机的 ssh 映射到 %s:%d",
+		"askport": "示例：把本机的 ssh 映射出去；remotePort 必须是你的端口之一",
+		"more":    "更多服务：每个再加一段 [[proxies]]，名字不同，各用一个你的端口",
+		"docs":    "frp 客户端配置参考：https://gofrp.org/docs/reference/client/",
+	},
+}
+
+func (a *API) ClientConfig(u users.User, lang string) string {
+	if lang != "zh" {
+		lang = "en"
+	}
+	tx := exportText[lang]
 	cl := a.Cfg.Client
+	notes := cl.Notes
+	if lang == "zh" && strings.TrimSpace(cl.NotesZh) != "" {
+		notes = cl.NotesZh
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# frpc.toml for user %s on %s (frpdesk %s, %s)\n", u.Name, cl.ServerAddr, a.Version, time.Now().Format("2006-01-02"))
-	for _, line := range strings.Split(strings.TrimSpace(cl.Notes), "\n") {
+	fmt.Fprintf(&b, "# "+tx["head"]+"\n", u.Name, cl.ServerAddr, a.Version, time.Now().Format("2006-01-02"))
+	for _, line := range strings.Split(strings.TrimSpace(notes), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			fmt.Fprintf(&b, "# %s\n", line)
 		}
@@ -251,33 +295,39 @@ func (a *API) ClientConfig(u users.User) string {
 	if cl.Token != "" {
 		fmt.Fprintf(&b, "auth.token = %q\n", cl.Token)
 	} else {
-		b.WriteString("auth.token = \"<the server's token: ask the admin>\"\n")
+		fmt.Fprintf(&b, "auth.token = %q\n", tx["token"])
 	}
 	fmt.Fprintf(&b, "user = %q\n", u.Name)
 	fmt.Fprintf(&b, "metadatas.token = %q\n", u.Token)
-	b.WriteString("loginFailExit = false   # keep retrying (the network may be down at boot)\n")
+	fmt.Fprintf(&b, "loginFailExit = false   # %s\n", tx["retry"])
 	b.WriteString("transport.tls.enable = true\n")
 	if cl.TLSServerName != "" {
-		fmt.Fprintf(&b, "transport.tls.serverName = %q   # keep: the server's network needs it\n", cl.TLSServerName)
+		fmt.Fprintf(&b, "transport.tls.serverName = %q   # %s\n", cl.TLSServerName, tx["sni"])
 	}
 	b.WriteString("\n")
 	if len(u.Ports) > 0 {
-		fmt.Fprintf(&b, "# your ports: %s (one remotePort per proxy)\n", strings.Join(u.Ports, ", "))
+		fmt.Fprintf(&b, "# "+tx["ports"]+"\n", strings.Join(u.Ports, ", "))
 	} else {
-		b.WriteString("# your ports: any the server allows\n")
+		b.WriteString("# " + tx["anyport"] + "\n")
 	}
 	if len(u.Domains) > 0 {
-		fmt.Fprintf(&b, "# your domains (http/https proxies): %s\n", strings.Join(u.Domains, ", "))
+		fmt.Fprintf(&b, "# "+tx["domains"]+"\n", strings.Join(u.Domains, ", "))
 	}
 	if len(u.Subdomains) > 0 {
-		fmt.Fprintf(&b, "# your subdomains: %s\n", strings.Join(u.Subdomains, ", "))
+		fmt.Fprintf(&b, "# "+tx["subs"]+"\n", strings.Join(u.Subdomains, ", "))
 	}
 	port := u.FirstPort()
-	if port == 0 {
-		port = 30000
+	if port > 0 {
+		fmt.Fprintf(&b, "\n# "+tx["example"]+"\n", cl.ServerAddr, port)
+	} else {
+		b.WriteString("\n# " + tx["askport"] + "\n")
 	}
-	fmt.Fprintf(&b, "\n# an example: ssh on this machine, reachable at %s:%d\n", cl.ServerAddr, port)
 	b.WriteString("[[proxies]]\nname = \"ssh\"\ntype = \"tcp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = 22\n")
-	fmt.Fprintf(&b, "remotePort = %d\n", port)
+	if port > 0 {
+		fmt.Fprintf(&b, "remotePort = %d\n", port)
+	} else {
+		b.WriteString("remotePort = 0   # <- " + tx["askport"] + "\n")
+	}
+	b.WriteString("\n# " + tx["more"] + "\n# " + tx["docs"] + "\n")
 	return b.String()
 }

@@ -19,7 +19,8 @@ export interface Me {
 }
 
 export interface Sample { t: number; conns: number; clients: number; in: number; out: number }
-export interface History { interval: number; samples: Sample[] }
+export interface Hour { t: number; n: number; conns: number; connsMax: number; clients: number; clientsMax: number; in: number; inMax: number; out: number; outMax: number; inBytes: number; outBytes: number }
+export interface History { range: string; interval: number; samples?: Sample[]; hours?: Hour[] }
 export interface DayTraffic { name: string; user: string; type: string; in: number[]; out: number[] }
 export interface Traffic { days: string[]; total: { in: number[]; out: number[] }; proxies: DayTraffic[] }
 export interface FrpsClient {
@@ -55,13 +56,13 @@ export const api = {
   updateUser: (name: string, u: User) => call<User>("PUT", `/api/users/${encodeURIComponent(name)}`, u),
   removeUser: (name: string) => call<void>("DELETE", `/api/users/${encodeURIComponent(name)}`),
   setEnabled: (name: string, on: boolean) => call<User>("POST", `/api/users/${encodeURIComponent(name)}/${on ? "enable" : "disable"}`),
-  exportUrl: (name: string) => `/api/users/${encodeURIComponent(name)}/frpc.toml`,
+  exportUrl: (name: string, lang: string) => `/api/users/${encodeURIComponent(name)}/frpc.toml?lang=${lang}`,
   serverInfo: () => call<any>("GET", "/api/frps/serverinfo"),
   proxies: (type: string) => call<{ proxies: any[] }>("GET", `/api/frps/proxies/${type}`).then((r) => r.proxies ?? []),
   // frps answers a bare array (older builds wrapped it)
   clients: () => call<FrpsClient[] | { clients: FrpsClient[] }>("GET", "/api/frps/clients").then((r) => Array.isArray(r) ? r : r?.clients ?? []),
   traffic: () => call<Traffic>("GET", "/api/frps/traffic"),
-  history: () => call<History>("GET", "/api/frps/history"),
+  history: (range: "24h" | "7d" | "30d") => call<History>("GET", `/api/frps/history?range=${range}`),
 };
 
 export function formatBytes(n: number | undefined, digits?: number): string {

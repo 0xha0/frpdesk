@@ -35,44 +35,61 @@ const when = (s: string) => (s ? s.replace("T", " ").slice(0, 16) : "—");
 
 <template>
   <div class="mb-4 flex flex-wrap items-center gap-2">
-    <div class="flex flex-wrap gap-1 rounded-lg bg-surface-2 p-1">
-      <button v-for="ty in types" :key="ty" class="rounded-md px-2.5 py-1 text-sm transition-colors"
+    <div class="flex max-w-full gap-1 overflow-x-auto rounded-lg bg-surface-2 p-1">
+      <button v-for="ty in types" :key="ty" class="shrink-0 rounded-md px-2.5 py-1 text-sm transition-colors"
         :class="type === ty ? 'bg-surface text-text shadow-sm' : 'text-text-2 hover:text-text'" @click="type = ty">{{ ty }}</button>
     </div>
     <button class="btn-outline ml-auto" :disabled="loading" @click="load">{{ t("Refresh") }}</button>
   </div>
 
-  <div class="card overflow-hidden">
-    <div v-if="error" class="p-8 text-center text-sm text-danger">{{ t("frps dashboard unreachable") }}: {{ error }}</div>
-    <div v-else-if="loading && rows.length === 0" class="p-8 text-center text-sm text-text-3">{{ t("Loading…") }}</div>
-    <div v-else-if="rows.length === 0" class="p-8 text-center text-sm text-text-2">{{ t("No proxies of this type.") }}</div>
-    <div v-else class="overflow-x-auto">
-      <table class="w-full">
-        <thead class="border-b border-line bg-surface-2/60">
-          <tr>
-            <th class="th">{{ t("User") }}</th>
-            <th class="th">{{ t("Name") }}</th>
-            <th class="th">{{ t("Remote") }}</th>
-            <th class="th">{{ t("Status") }}</th>
-            <th class="th">{{ t("Client") }}</th>
-            <th class="th">{{ t("Today in / out") }}</th>
-            <th class="th">{{ t("Connections") }}</th>
-            <th class="th">{{ t("Last start") }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="p in rows" :key="p.name" class="border-b border-line last:border-0 hover:bg-surface-2/40">
-            <td class="td mono">{{ split(p)[0] || "—" }}</td>
-            <td class="td mono font-medium">{{ split(p)[1] }}</td>
-            <td class="td mono">{{ remote(p) }}</td>
-            <td class="td"><span class="badge" :class="p.status === 'online' ? 'bg-ok-soft text-ok' : 'bg-surface-2 text-text-3'">{{ t(p.status) }}</span></td>
-            <td class="td mono text-text-2">{{ p.clientVersion || "—" }}</td>
-            <td class="td mono text-text-2">{{ formatBytes(p.todayTrafficIn) }} / {{ formatBytes(p.todayTrafficOut) }}</td>
-            <td class="td mono text-text-2">{{ p.curConns ?? 0 }}</td>
-            <td class="td mono text-text-2">{{ when(p.lastStartTime) }}</td>
-          </tr>
-        </tbody>
-      </table>
+  <div v-if="error" class="card p-8 text-center text-sm text-danger">{{ t("frps dashboard unreachable") }}: {{ error }}</div>
+  <div v-else-if="loading && rows.length === 0" class="card p-8 text-center text-sm text-text-3">{{ t("Loading…") }}</div>
+  <div v-else-if="rows.length === 0" class="card p-8 text-center text-sm text-text-2">{{ t("No proxies of this type.") }}</div>
+  <template v-else>
+    <div class="grid gap-3 md:hidden">
+      <div v-for="p in rows" :key="p.name" class="card p-4">
+        <div class="flex items-center justify-between gap-2">
+          <span class="mono font-semibold">{{ split(p)[1] }}<span class="font-normal text-text-3"> · {{ split(p)[0] || "—" }}</span></span>
+          <span class="badge" :class="p.status === 'online' ? 'bg-ok-soft text-ok' : 'bg-surface-2 text-text-3'">{{ t(p.status) }}</span>
+        </div>
+        <dl class="mono mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
+          <dt class="text-text-3">{{ t("Remote") }}</dt><dd>{{ remote(p) }}</dd>
+          <dt class="text-text-3">{{ t("Today in / out") }}</dt><dd class="text-text-2">{{ formatBytes(p.todayTrafficIn) }} / {{ formatBytes(p.todayTrafficOut) }}</dd>
+          <dt class="text-text-3">{{ t("Connections") }}</dt><dd class="text-text-2">{{ p.curConns ?? 0 }}</dd>
+          <dt class="text-text-3">{{ t("Client") }}</dt><dd class="text-text-2">{{ p.clientVersion || "—" }}</dd>
+          <dt class="text-text-3">{{ t("Last start") }}</dt><dd class="text-text-2">{{ when(p.lastStartTime) }}</dd>
+        </dl>
+      </div>
     </div>
-  </div>
+    <div class="card hidden overflow-hidden md:block">
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead class="border-b border-line bg-surface-2/60">
+            <tr>
+              <th class="th">{{ t("User") }}</th>
+              <th class="th">{{ t("Name") }}</th>
+              <th class="th">{{ t("Remote") }}</th>
+              <th class="th">{{ t("Status") }}</th>
+              <th class="th">{{ t("Client") }}</th>
+              <th class="th">{{ t("Today in / out") }}</th>
+              <th class="th">{{ t("Connections") }}</th>
+              <th class="th">{{ t("Last start") }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in rows" :key="p.name" class="border-b border-line last:border-0 hover:bg-surface-2/40">
+              <td class="td mono">{{ split(p)[0] || "—" }}</td>
+              <td class="td mono font-medium">{{ split(p)[1] }}</td>
+              <td class="td mono">{{ remote(p) }}</td>
+              <td class="td"><span class="badge" :class="p.status === 'online' ? 'bg-ok-soft text-ok' : 'bg-surface-2 text-text-3'">{{ t(p.status) }}</span></td>
+              <td class="td mono text-text-2">{{ p.clientVersion || "—" }}</td>
+              <td class="td mono text-text-2">{{ formatBytes(p.todayTrafficIn) }} / {{ formatBytes(p.todayTrafficOut) }}</td>
+              <td class="td mono text-text-2">{{ p.curConns ?? 0 }}</td>
+              <td class="td mono text-text-2">{{ when(p.lastStartTime) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </template>
 </template>

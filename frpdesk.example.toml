@@ -30,3 +30,7 @@ notes = """
 Questions: admin@example.com
 Keep your token to yourself: whoever has it can take your ports.
 """
+notes_zh = """
+有问题找 admin@example.com
+令牌只给自己用：拿到它的人就能占用你的端口。
+"""

@@ -53,8 +53,10 @@ type Client struct {
 	Token string `toml:"token"`
 	// transport.tls.serverName for the clients: an IP where the network filters TLS by name
 	TLSServerName string `toml:"tls_server_name"`
-	// a few lines put at the top of every exported config (how to reach the admin, rules)
-	Notes string `toml:"notes"`
+	// a few lines put at the top of every exported config (how to reach the admin, rules); notes_zh
+	// for the Chinese export, when set (else notes is used for both)
+	Notes   string `toml:"notes"`
+	NotesZh string `toml:"notes_zh"`
 }
 
 func Load(path string) (*Config, error) {

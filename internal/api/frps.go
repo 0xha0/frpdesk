@@ -183,7 +183,25 @@ func sum(d dayTraffic) int64 {
 	return s
 }
 
-// frpsHistory: the sampler's last 24 hours (connections, clients, throughput each minute)
+// frpsHistory: the sampler's rings. ?range=24h: a sample a minute for the day; 7d / 30d: hours
+// (averages, peaks and bytes), the last 7 or 30 days
 func (a *API) frpsHistory(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"interval": int(a.sampler.Interval.Seconds()), "samples": a.sampler.Samples()})
+	switch c.DefaultQuery("range", "24h") {
+	case "24h":
+		c.JSON(http.StatusOK, gin.H{"range": "24h", "interval": int(a.sampler.Interval.Seconds()), "samples": a.sampler.Samples()})
+	case "7d", "30d":
+		days := 7
+		if c.Query("range") == "30d" {
+			days = 30
+		}
+		cut := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+		hours := a.sampler.Hours()
+		i := 0
+		for i < len(hours) && hours[i].T < cut {
+			i++
+		}
+		c.JSON(http.StatusOK, gin.H{"range": c.Query("range"), "interval": 3600, "hours": hours[i:]})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "range: 24h, 7d or 30d"})
+	}
 }
