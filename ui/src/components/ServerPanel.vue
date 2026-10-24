@@ -5,6 +5,8 @@ import { t } from "../i18n";
 import LineChart from "./LineChart.vue";
 import BarChart from "./BarChart.vue";
 import Sparkline from "./Sparkline.vue";
+import ShareBar from "./ShareBar.vue";
+import BarList from "./BarList.vue";
 
 type Range = "24h" | "7d" | "30d";
 const me = inject<Ref<Me | null>>("me");
@@ -80,6 +82,28 @@ const daily = computed(() => {
 });
 const daySeries = computed(() => daily.value ? [{ name: t("In"), color: in1, values: daily.value.in }, { name: t("Out"), color: in2, values: daily.value.out }] : []);
 const periodTotal = computed(() => daySeries.value.reduce((s, x) => s + x.values.reduce((a, b) => a + b, 0), 0));
+
+// traffic by user: frps's per-proxy days summed per user (today for the 24h range, else 7 days:
+// frps keeps no more per proxy); a user selected shows its proxies
+const userSel = ref("");
+const period = (p: { in: number[]; out: number[] }) => {
+  if (range.value === "24h") return { in: p.in[p.in.length - 1] ?? 0, out: p.out[p.out.length - 1] ?? 0 };
+  return { in: p.in.reduce((a, b) => a + b, 0), out: p.out.reduce((a, b) => a + b, 0) };
+};
+const byUser = computed(() => {
+  const m = new Map<string, number>();
+  for (const p of traffic.value?.proxies ?? []) {
+    const v = period(p);
+    m.set(p.user || "—", (m.get(p.user || "—") ?? 0) + v.in + v.out);
+  }
+  return [...m].map(([key, value]) => ({ key, label: key, value }));
+});
+const userProxies = computed(() => (traffic.value?.proxies ?? []).filter((p) => (p.user || "—") === userSel.value).map((p) => {
+  const v = period(p);
+  const name = p.name.startsWith(userSel.value + ".") ? p.name.slice(userSel.value.length + 1) : p.name;
+  return { label: `${name} · ${p.type}`, value: v.in + v.out, in: v.in, out: v.out };
+}));
+const userPeriod = computed(() => (range.value === "24h" ? t("today") : t("last 7 days")));
 
 const port = (v: number) => (v ? String(v) : "—");
 const yesno = (v: boolean) => (v ? t("yes") : t("no"));
@@ -164,6 +188,19 @@ const fields = computed(() => info.value ? [
         <span class="text-xs text-text-3">{{ daily?.note || t("from frpdesk's own samples") }} · {{ formatBytes(periodTotal) }}</span>
       </div>
       <BarChart v-if="daily" :series="daySeries" :labels="daily.labels" :format="(v) => formatBytes(v)" :height="200" :base="1024" />
+    </div>
+
+    <div class="card mb-4 p-3 md:p-4">
+      <div class="mb-3 flex flex-wrap items-baseline justify-between gap-x-3">
+        <h3 class="text-sm font-medium">
+          <template v-if="!userSel">{{ t("Traffic by user") }}, {{ userPeriod }}</template>
+          <template v-else>{{ t("Proxies of {user}", { user: userSel }) }}, {{ userPeriod }}</template>
+        </h3>
+        <button v-if="userSel" class="btn-ghost !px-2 !py-0.5 text-xs" @click="userSel = ''">← {{ t("All users") }}</button>
+        <span v-else-if="range === '30d'" class="text-xs text-text-3">{{ t("frps keeps 7 days") }}</span>
+      </div>
+      <ShareBar v-if="!userSel" :items="byUser" :format="(v) => formatBytes(v)" @select="userSel = $event" />
+      <BarList v-else :rows="userProxies" :format="(v) => formatBytes(v)" />
     </div>
 
     <div class="card mb-4 overflow-hidden">

@@ -21,6 +21,9 @@
   /* charts: the series (validated for colour vision on both surfaces), the chrome */
   --series-1: #2a78d6;
   --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
   --grid: #e3e6eb;
   --axis: #c3c7cf;
 }
@@ -44,6 +47,9 @@
     --danger-soft: #3b1414;
     --series-1: #3987e5;
     --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
     --grid: #2a3039;
     --axis: #3a414b;
   }
