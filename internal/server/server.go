@@ -25,18 +25,26 @@ import (
 	"frpdesk/ui"
 )
 
+const maxBody = 1 << 20 // a request body: a user, a login, a plugin call; never more
+
 type Server struct {
 	cfg     *config.Config
+	api     *api.API
 	plugin  *http.Server
 	web     *http.Server
+	cancel  context.CancelFunc
 	version string
+}
+
+func bodyLimit(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
 }
 
 func New(cfg *config.Config, store *users.Store, version string) (*Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 
 	p := gin.New()
-	p.Use(gin.Recovery())
+	p.Use(gin.Recovery(), bodyLimit)
 	p.POST("/handler", (&plugin.Plugin{Users: store}).Handle)
 
 	// the session cookie: signed and encrypted with keys made now (a restart logs everyone out),
@@ -54,8 +62,14 @@ func New(cfg *config.Config, store *users.Store, version string) (*Server, error
 		MaxAge: cfg.Server.SessionHours * 3600,
 	})
 	w := gin.New()
-	w.Use(gin.Recovery(), sessions.Sessions("frpdesk", store2))
-	api.New(cfg, store, version).Register(w.Group("/api"))
+	// the client's address for the login throttle and the audit log: the proxy in front (on this
+	// machine: a tunnel, nginx, caddy) says it in X-Forwarded-For; anyone else's header is ignored
+	if err := w.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil {
+		return nil, err
+	}
+	w.Use(gin.Recovery(), bodyLimit, sessions.Sessions("frpdesk", store2))
+	a := api.New(cfg, store, version)
+	a.Register(w.Group("/api"))
 
 	dist, err := fs.Sub(ui.Dist, "dist")
 	if err != nil {
@@ -70,6 +84,8 @@ func New(cfg *config.Config, store *users.Store, version string) (*Server, error
 			c.JSON(http.StatusNotFound, gin.H{"error": "no such endpoint"})
 			return
 		}
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Referrer-Policy", "same-origin")
 		// a built file as it is; anything else is the app (its router takes the path)
 		if f, err := static.Open(c.Request.URL.Path); err == nil {
 			f.Close()
@@ -84,12 +100,17 @@ func New(cfg *config.Config, store *users.Store, version string) (*Server, error
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
 
-	return &Server{cfg: cfg, version: version,
-		plugin: &http.Server{Handler: p, ReadHeaderTimeout: 10 * time.Second},
-		web:    &http.Server{Handler: w, ReadHeaderTimeout: 10 * time.Second}}, nil
+	timeouts := func(h http.Handler) *http.Server {
+		return &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+			WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second}
+	}
+	return &Server{cfg: cfg, api: a, version: version, plugin: timeouts(p), web: timeouts(w)}, nil
 }
 
 func (s *Server) Run() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	go s.api.RunSampler(ctx)
 	errs := make(chan error, 2)
 	serve := func(srv *http.Server, addr, what string) {
 		l, err := net.Listen("tcp", addr)
@@ -107,9 +128,14 @@ func (s *Server) Run() error {
 	return <-errs
 }
 
+// Shutdown stops the listeners and the sampler (which saves its history)
 func (s *Server) Shutdown() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	s.plugin.Shutdown(ctx)
 	s.web.Shutdown(ctx)
+	time.Sleep(200 * time.Millisecond) // the sampler's save on cancel
 }

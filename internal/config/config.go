@@ -76,6 +76,14 @@ func Load(path string) (*Config, error) {
 	if cfg.Server.UIPort == cfg.Server.PluginPort && cfg.Server.UIAddr == cfg.Server.PluginAddr {
 		return nil, errors.New("server.ui_port must differ from server.plugin_port: the plugin endpoint has no login")
 	}
+	for name, port := range map[string]int{"server.plugin_port": cfg.Server.PluginPort, "server.ui_port": cfg.Server.UIPort, "frps.port": cfg.Frps.Port, "client.server_port": cfg.Client.ServerPort} {
+		if port < 1 || port > 65535 {
+			return nil, fmt.Errorf("%s: %d is not a port", name, port)
+		}
+	}
+	if cfg.Server.SessionHours < 0 {
+		return nil, errors.New("server.session_hours: 0 or more")
+	}
 	uf := cfg.Server.UsersFile
 	if !filepath.IsAbs(uf) {
 		uf = filepath.Join(filepath.Dir(path), uf)

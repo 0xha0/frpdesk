@@ -1,14 +1,17 @@
 // Package api is the web UI's JSON API (/api/...): the admin's session, the users, each user's
-// frpc.toml, and frps's own dashboard API passed through for the server and proxies pages.
+// frpc.toml, and frps's own dashboard API passed through (and summed, and sampled) for the server
+// and proxies pages.
 package api
 
 import (
+	"context"
 	"crypto/subtle"
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
+	"log"
 	"net/http"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,35 +28,63 @@ type API struct {
 	Cfg     *config.Config
 	Users   *users.Store
 	Version string
-	frps    *http.Client
+	frps    *frpsClient
+	sampler *Sampler
+	limiter *loginLimiter
 }
 
 func New(cfg *config.Config, store *users.Store, version string) *API {
-	a := &API{Cfg: cfg, Users: store, Version: version, frps: &http.Client{Timeout: 10 * time.Second}}
-	if cfg.Frps.TLS {
-		a.frps.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // frps's own certificate
-	}
+	a := &API{Cfg: cfg, Users: store, Version: version, frps: newFrpsClient(cfg.Frps), limiter: newLoginLimiter()}
+	a.sampler = newSampler(func() (serverInfo, error) {
+		var info serverInfo
+		err := a.frps.get("/api/serverinfo", &info)
+		return info, err
+	}, filepath.Join(filepath.Dir(cfg.UsersFile), "history.json"))
 	return a
 }
 
+// RunSampler samples frps until ctx ends (call it in a goroutine)
+func (a *API) RunSampler(ctx context.Context) { a.sampler.Run(ctx) }
+
 func (a *API) Register(r *gin.RouterGroup) {
+	r.Use(noCrossSite)
 	r.POST("/login", a.login)
 	r.POST("/logout", a.logout)
 	auth := r.Group("", a.requireLogin)
 	auth.GET("/me", a.me)
 	auth.GET("/users", a.listUsers)
 	auth.POST("/users", a.addUser)
-	auth.PUT("/users/:user", a.updateUser)
-	auth.DELETE("/users/:user", a.removeUser)
-	auth.POST("/users/:user/enable", a.setEnabled(true))
-	auth.POST("/users/:user/disable", a.setEnabled(false))
-	auth.GET("/users/:user/frpc.toml", a.exportUser)
-	auth.GET("/frps/serverinfo", a.frpsGet("/api/serverinfo"))
-	auth.GET("/frps/proxies/:type", func(c *gin.Context) { a.frpsGet("/api/proxy/" + c.Param("type"))(c) })
-	auth.GET("/frps/traffic/:name", func(c *gin.Context) { a.frpsGet("/api/traffic/" + c.Param("name"))(c) })
+	u := auth.Group("/users/:user", validName)
+	u.PUT("", a.updateUser)
+	u.DELETE("", a.removeUser)
+	u.POST("/enable", a.setEnabled(true))
+	u.POST("/disable", a.setEnabled(false))
+	u.GET("/frpc.toml", a.exportUser)
+	auth.GET("/frps/serverinfo", a.passthrough("/api/serverinfo"))
+	auth.GET("/frps/clients", a.passthrough("/api/clients"))
+	auth.GET("/frps/proxies/:type", a.frpsProxies)
+	auth.GET("/frps/traffic", a.frpsTraffic)
+	auth.GET("/frps/history", a.frpsHistory)
 }
 
 func equal(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
+
+// noCrossSite: a request that changes something must come from the app's own JavaScript (the
+// header fetch sets, which a form or a link from another site can't), and never cross-site
+func noCrossSite(c *gin.Context) {
+	if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
+		return
+	}
+	if c.GetHeader("X-Requested-With") == "" || strings.EqualFold(c.GetHeader("Sec-Fetch-Site"), "cross-site") {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "the request must come from the app"})
+	}
+}
+
+func validName(c *gin.Context) {
+	if !users.ValidName(c.Param("user")) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": users.ErrBadName.Error()})
+	}
+}
 
 func (a *API) loggedIn(c *gin.Context) bool {
 	v, _ := sessions.Default(c).Get(sessionKey).(string)
@@ -67,11 +98,18 @@ func (a *API) requireLogin(c *gin.Context) {
 }
 
 func (a *API) login(c *gin.Context) {
+	addr := c.ClientIP()
+	now := time.Now()
+	if wait := a.limiter.blocked(addr, now); wait > 0 {
+		c.Header("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": fmt.Sprintf("too many failed logins: wait %d s", int(wait.Seconds())+1)})
+		return
+	}
 	var in struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&in); err != nil {
+	if err := c.ShouldBindJSON(&in); err != nil || len(in.Username) > 256 || len(in.Password) > 1024 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "username and password"})
 		return
 	}
@@ -80,14 +118,21 @@ func (a *API) login(c *gin.Context) {
 	pwdOK := equal(in.Password, a.Cfg.Server.AdminPassword)
 	s := sessions.Default(c)
 	if !(userOK && pwdOK) {
+		a.limiter.fail(addr, now)
+		log.Printf("audit: failed login for %q from %s", in.Username, addr)
 		s.Delete(sessionKey)
 		s.Save()
 		time.Sleep(500 * time.Millisecond)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "wrong username or password"})
 		return
 	}
+	a.limiter.success(addr)
+	log.Printf("audit: login by %s from %s", a.Cfg.Server.AdminUser, addr)
 	s.Set(sessionKey, a.Cfg.Server.AdminUser)
-	s.Save()
+	if err := s.Save(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "can't start the session"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"user": a.Cfg.Server.AdminUser})
 }
 
@@ -121,14 +166,15 @@ func userError(c *gin.Context, err error) {
 		errors.Is(err, users.ErrBadDomain), errors.Is(err, users.ErrBadSub):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "saving the users' file: " + err.Error()})
+		log.Printf("users file: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "saving the users' file failed"})
 	}
 }
 
 func (a *API) addUser(c *gin.Context) {
 	var u users.User
 	if err := c.ShouldBindJSON(&u); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request body"})
 		return
 	}
 	u, err := a.Users.Add(u)
@@ -136,13 +182,14 @@ func (a *API) addUser(c *gin.Context) {
 		userError(c, err)
 		return
 	}
+	log.Printf("audit: user %s added (ports %v) from %s", u.Name, u.Ports, c.ClientIP())
 	c.JSON(http.StatusCreated, u)
 }
 
 func (a *API) updateUser(c *gin.Context) {
 	var u users.User
 	if err := c.ShouldBindJSON(&u); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request body"})
 		return
 	}
 	u, err := a.Users.Update(c.Param("user"), u)
@@ -150,6 +197,7 @@ func (a *API) updateUser(c *gin.Context) {
 		userError(c, err)
 		return
 	}
+	log.Printf("audit: user %s updated (ports %v, enabled %v) from %s", u.Name, u.Ports, u.Enable, c.ClientIP())
 	c.JSON(http.StatusOK, u)
 }
 
@@ -158,6 +206,7 @@ func (a *API) removeUser(c *gin.Context) {
 		userError(c, err)
 		return
 	}
+	log.Printf("audit: user %s removed from %s", c.Param("user"), c.ClientIP())
 	c.Status(http.StatusNoContent)
 }
 
@@ -168,6 +217,7 @@ func (a *API) setEnabled(on bool) gin.HandlerFunc {
 			userError(c, err)
 			return
 		}
+		log.Printf("audit: user %s enabled=%v from %s", u.Name, on, c.ClientIP())
 		c.JSON(http.StatusOK, u)
 	}
 }
@@ -182,6 +232,7 @@ func (a *API) exportUser(c *gin.Context) {
 	}
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="frpc-%s.toml"`, u.Name))
+	c.Header("Cache-Control", "no-store")
 	c.String(http.StatusOK, a.ClientConfig(u))
 }
 
@@ -229,30 +280,4 @@ func (a *API) ClientConfig(u users.User) string {
 	b.WriteString("[[proxies]]\nname = \"ssh\"\ntype = \"tcp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = 22\n")
 	fmt.Fprintf(&b, "remotePort = %d\n", port)
 	return b.String()
-}
-
-// frpsGet passes a GET to frps's dashboard API and returns its body as it is
-func (a *API) frpsGet(path string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		scheme := "http"
-		if a.Cfg.Frps.TLS {
-			scheme = "https"
-		}
-		req, _ := http.NewRequest("GET", fmt.Sprintf("%s://%s:%d%s", scheme, a.Cfg.Frps.Addr, a.Cfg.Frps.Port, path), nil)
-		if a.Cfg.Frps.User != "" {
-			req.SetBasicAuth(a.Cfg.Frps.User, a.Cfg.Frps.Password)
-		}
-		res, err := a.frps.Do(req)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "frps dashboard: " + err.Error()})
-			return
-		}
-		defer res.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(res.Body, 8<<20))
-		if res.StatusCode != http.StatusOK {
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("frps dashboard: HTTP %d", res.StatusCode)})
-			return
-		}
-		c.Data(http.StatusOK, "application/json; charset=utf-8", body)
-	}
 }

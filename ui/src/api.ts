@@ -1,5 +1,5 @@
 // the API client: JSON in and out, errors as exceptions with the server's message, a 401 sends the
-// app to the login page
+// app to the login page. Every call carries X-Requested-With: the server refuses a change without it.
 import router from "./router";
 
 export interface User {
@@ -18,17 +18,23 @@ export interface Me {
   client: { server_addr: string; server_port: number; tls_server_name: string };
 }
 
+export interface Sample { t: number; conns: number; clients: number; in: number; out: number }
+export interface History { interval: number; samples: Sample[] }
+export interface DayTraffic { name: string; user: string; type: string; in: number[]; out: number[] }
+export interface Traffic { days: string[]; total: { in: number[]; out: number[] }; proxies: DayTraffic[] }
+export interface FrpsClient {
+  key: string; user: string; clientID: string; runID: string; version?: string; wireProtocol?: string;
+  hostname: string; clientIP?: string; firstConnectedAt: number; lastConnectedAt: number; disconnectedAt?: number; online: boolean;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body !== undefined ? { "Content-Type": "application/json", "X-Requested-With": "fetch" } : { "X-Requested-With": "fetch" },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    credentials: "same-origin",
-  });
+  const headers: Record<string, string> = { "X-Requested-With": "fetch" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, credentials: "same-origin" });
   if (res.status === 401 && !path.endsWith("/login")) {
     router.replace({ name: "login", query: { next: router.currentRoute.value.fullPath } });
   }
@@ -52,13 +58,32 @@ export const api = {
   exportUrl: (name: string) => `/api/users/${encodeURIComponent(name)}/frpc.toml`,
   serverInfo: () => call<any>("GET", "/api/frps/serverinfo"),
   proxies: (type: string) => call<{ proxies: any[] }>("GET", `/api/frps/proxies/${type}`).then((r) => r.proxies ?? []),
+  // frps answers a bare array (older builds wrapped it)
+  clients: () => call<FrpsClient[] | { clients: FrpsClient[] }>("GET", "/api/frps/clients").then((r) => Array.isArray(r) ? r : r?.clients ?? []),
+  traffic: () => call<Traffic>("GET", "/api/frps/traffic"),
+  history: () => call<History>("GET", "/api/frps/history"),
 };
 
-export function formatBytes(n: number | undefined): string {
-  if (!n) return "0 B";
+export function formatBytes(n: number | undefined, digits?: number): string {
+  if (!n || n < 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   let v = n;
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+  const d = digits ?? (v < 10 && i > 0 ? 1 : 0);
+  return `${v.toFixed(d)} ${units[i]}`;
+}
+
+export const formatRate = (n: number | undefined) => `${formatBytes(n)}/s`;
+
+export function formatTime(unix: number): string {
+  const d = new Date(unix * 1000);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+export function formatDateTime(unix: number): string {
+  if (!unix) return "—";
+  const d = new Date(unix * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }

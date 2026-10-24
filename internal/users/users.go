@@ -60,6 +60,9 @@ var (
 	ErrBadSub    = errors.New("subdomains: letters, digits and - only")
 )
 
+// ValidName: a name as the file and the URLs take it
+func ValidName(name string) bool { return nameFormat.MatchString(name) }
+
 type Store struct {
 	path  string
 	mu    sync.RWMutex

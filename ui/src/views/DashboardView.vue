@@ -20,9 +20,9 @@ async function signOut() {
 }
 
 const tabs = [
+  { name: "server", label: "Server" },
   { name: "users", label: "Users" },
   { name: "proxies", label: "Proxies" },
-  { name: "server", label: "Server" },
 ];
 </script>
 

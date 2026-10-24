@@ -29,6 +29,21 @@ frpc (user B) ──┼──► frps ──httpPlugins──┘   (is this user
   server's token, their user and token, TLS, an example proxy on their first port) from the
   `[client]` section of the config.
 
+## What the Server page shows
+
+frps keeps traffic **by day** (the last 7, per proxy and in total) and a few live gauges
+(connections, clients, proxies by type, today's bytes); that is all its API has, and its Prometheus
+endpoint says no more. frpdesk adds the finer view: every minute it samples frps's gauges and the
+throughput since the last sample, keeps 24 hours of that (`history.json` beside the users' file, so a
+restart keeps the day), and draws:
+
+- stat tiles with a trend: connections, clients, inbound and outbound now (bytes/s), today's bytes
+- throughput, connections and clients over the last 24 hours (crosshair tooltips, arrow keys, a
+  table view)
+- traffic by day over the last 7 days, all proxies or one
+- the connected clients (user, host, frpc version, protocol, address, connected since)
+- frps's settings
+
 ## Install
 
 Releases: a tarball per platform with the binary, `frpdesk.example.toml` and `frps.example.toml`.
