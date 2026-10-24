@@ -36,7 +36,10 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   const headers: Record<string, string> = { "X-Requested-With": "fetch" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const res = await fetch(path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, credentials: "same-origin" });
-  if (res.status === 401 && !path.endsWith("/login")) {
+  // a session gone (expired, or frpdesk restarted): to the login, back here afterwards. The page's
+  // requests run several at a time, so only the first one may send us there: the others would wrap
+  // the login page's own path into `next` (/login?next=/login?next=…) and the login would lead nowhere.
+  if (res.status === 401 && !path.endsWith("/login") && router.currentRoute.value.name !== "login") {
     router.replace({ name: "login", query: { next: router.currentRoute.value.fullPath } });
   }
   if (res.status === 204) return undefined as T;

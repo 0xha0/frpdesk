@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api";
 import { t, lang, setLang } from "../i18n";
@@ -11,13 +11,26 @@ const password = ref("");
 const busy = ref(false);
 const error = ref("");
 
+// where to go once signed in: ?next= when it's a path of ours and not the login page itself
+function next() {
+  const n = route.query.next;
+  return typeof n === "string" && n.startsWith("/") && !n.startsWith("/login") ? n : "/";
+}
+
+// already signed in (a stale link, a second tab): straight on
+onMounted(async () => {
+  try {
+    await api.me();
+    router.replace(next());
+  } catch { /* not signed in: the form */ }
+});
+
 async function submit() {
   error.value = "";
   busy.value = true;
   try {
     await api.login(username.value, password.value);
-    const next = typeof route.query.next === "string" && route.query.next.startsWith("/") ? route.query.next : "/";
-    router.replace(next);
+    router.replace(next());
   } catch (e) {
     error.value = e instanceof ApiError && e.status === 401 ? t("Wrong username or password") : String((e as Error).message);
   } finally {
