@@ -1,0 +1,6 @@
+/frpdesk
+/dist/
+/ui/node_modules/
+/ui/dist/*
+!/ui/dist/index.html
+*.tmp

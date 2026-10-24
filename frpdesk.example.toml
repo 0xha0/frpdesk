@@ -1,0 +1,32 @@
+# frpdesk.toml — copy next to the binary (or pass -c). The users' file (users.toml) lives beside it.
+
+[server]
+# frps's plugin endpoint (POST /handler): where frps reaches it, nothing else
+plugin_addr = "127.0.0.1"
+plugin_port = 7200
+# the web UI and its API: put a TLS-terminating reverse proxy in front
+ui_addr = "127.0.0.1"
+ui_port = 7201
+cookie_secure = true       # the session cookie only over HTTPS: true behind an HTTPS proxy
+admin_user = "admin"
+admin_password = "change-me"
+session_hours = 0          # 0: a login lasts until the browser closes
+
+[frps]
+# frps's own dashboard (webServer in frps.toml), for the Server and Proxies pages
+addr = "127.0.0.1"
+port = 7500
+user = "admin"
+password = "change-me"
+tls = false
+
+[client]
+# what the exported frpc.toml says about reaching this server
+server_addr = "frp.example.com"
+server_port = 7000
+token = "the frps auth.token"      # the users' own tokens come from the users' file
+tls_server_name = ""               # set to an IP where the network filters TLS by name
+notes = """
+Questions: admin@example.com
+Keep your token to yourself: whoever has it can take your ports.
+"""
